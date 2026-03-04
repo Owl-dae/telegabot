@@ -27,6 +27,8 @@
 - `/top [утро|день|вечер]`
 - `/queue [n] [утро|день|вечер]`
 - `/plan_day`
+- `/publish_plan`
+- `/strategy`
 - `/feedback <content_id> <1..10>`
 - `/stats`
 - `/optimize`

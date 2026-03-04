@@ -109,5 +109,12 @@ class EngineTests(unittest.TestCase):
             self.assertGreaterEqual(float(out[0].item["trend_score"]), float(out[1].item["trend_score"]))
 
 
+    def test_weekly_strategy_shape(self):
+        ws = self.engine.weekly_strategy()
+        self.assertIn("best_bucket", ws)
+        self.assertIn("days", ws)
+        self.assertEqual(len(ws["days"]), 7)
+
+
 if __name__ == "__main__":
     unittest.main()

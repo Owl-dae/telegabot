@@ -403,7 +403,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/menu /publish_now /publish_id <id> /top /queue /plan_day\n"
         "/style /autopilot /set_cooldown /feedback /stats\n"
         "/monetize /set_offer /monetization_report /audit_content /optimize\n"
-        "/trending [n] [утро|день|вечер]"
+        "/trending [n] [утро|день|вечер]\n"
+        "/strategy /publish_plan"
     )
     await _safe_reply(update, text)
 
@@ -427,6 +428,53 @@ async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for i, r in enumerate(ranked, 1):
         lines.append(f"{i}. #{r.content_id} {r.item['title']} | trend={r.item.get('trend_score')}")
     await _safe_reply(update, "\n".join(lines))
+
+
+async def strategy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    engine: ContentEngine = context.application.bot_data["engine"]
+    cfg: BotConfig = context.application.bot_data["config"]
+    if not await _admin_guard(update, cfg) or not update.message:
+        return
+
+    ws = engine.weekly_strategy()
+    lines = [
+        "Weekly strategy",
+        f"best_bucket={ws['best_bucket']}",
+        f"best_platform={ws['best_platform']}",
+    ]
+    for d in ws["days"]:
+        if d["content_id"] is None:
+            lines.append(f"D{d['day']} {d['bucket']}: no candidate | style={d['style']}")
+        else:
+            lines.append(f"D{d['day']} {d['bucket']}: #{d['content_id']} {d['title']} | score={d['score']} | style={d['style']}")
+    await _safe_reply(update, "\n".join(lines))
+
+
+async def publish_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    engine: ContentEngine = context.application.bot_data["engine"]
+    cfg: BotConfig = context.application.bot_data["config"]
+    if not await _admin_guard(update, cfg) or not update.message:
+        return
+
+    plan = engine.plan_for_buckets(["утро", "день", "вечер"], cooldown_hours=int(_state(context, "cooldown_hours", cfg.cooldown_hours)))
+    auto = bool(_state(context, "autopilot", True))
+    if not plan:
+        await _safe_reply(update, "План пуст — нет кандидатов")
+        return
+
+    published = []
+    for bucket in ["утро", "день", "вечер"]:
+        ranked = plan.get(bucket)
+        if not ranked:
+            continue
+        style = _effective_style(context, bucket, auto)
+        if cfg.dry_run:
+            published.append(f"DRY {bucket}: #{ranked.content_id} {ranked.item['title']} | {style}")
+            continue
+        await _publish_ranked(context, ranked, bucket=bucket, style=style)
+        published.append(f"OK {bucket}: #{ranked.content_id} {ranked.item['title']} | {style}")
+
+    await _safe_reply(update, "\n".join(["Plan publish result:"] + published))
 
     await q.answer()
     data = q.data or ""
@@ -609,6 +657,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_error_handler(on_error)
 
+    app.add_handler(CommandHandler("publish_plan", publish_plan))
+    app.add_handler(CommandHandler("strategy", strategy))
     schedule_jobs(app)
     logger.info(
         "Bot started | dry_run=%s | autopilot=%s | style=%s | cooldown=%s | monetization=%s",

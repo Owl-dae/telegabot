@@ -376,6 +376,35 @@ class ContentEngine:
             f"Сфокусируйся на публикациях в окне: {best_bucket}",
             f"Базовый стиль для роста сейчас: {best_style}",
             f"Лучше всего заходит платформа-референс: {best_platform}",
+
+    def weekly_strategy(self) -> Dict[str, Any]:
+        # Lightweight 7-day blueprint: rotate by best bucket and keep diversity
+        best_bucket = self.recommend_best_bucket()
+        bucket_cycle = [best_bucket, "утро", "день", "вечер", "день", "утро", "вечер"]
+        used: set[int] = set()
+        days = []
+        for i, bucket in enumerate(bucket_cycle, 1):
+            ranked = self.rank_candidates(posting_time=bucket, top_n=1, cooldown_hours=24, exclude_ids=used)
+            if ranked:
+                pick = ranked[0]
+                used.add(pick.content_id)
+                days.append({
+                    "day": i,
+                    "bucket": bucket,
+                    "content_id": pick.content_id,
+                    "title": pick.item.get("title"),
+                    "score": round(pick.score, 2),
+                    "style": self.recommend_best_style(bucket),
+                })
+            else:
+                days.append({"day": i, "bucket": bucket, "content_id": None, "title": None, "score": None, "style": self.recommend_best_style(bucket)})
+
+        return {
+            "best_bucket": best_bucket,
+            "best_platform": self.recommend_best_platform(),
+            "days": days,
+        }
+
         ]
         if not monetization_ready:
             tips.append("Добавь OFFER_URL и включи monetization для захвата трафика")
