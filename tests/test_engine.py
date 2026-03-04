@@ -102,5 +102,12 @@ class EngineTests(unittest.TestCase):
         self.assertIn("💬", text)
 
 
+    def test_top_trending_content(self):
+        out = self.engine.top_trending_content(limit=5, bucket="утро")
+        self.assertLessEqual(len(out), 5)
+        if len(out) >= 2:
+            self.assertGreaterEqual(float(out[0].item["trend_score"]), float(out[1].item["trend_score"]))
+
+
 if __name__ == "__main__":
     unittest.main()

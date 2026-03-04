@@ -190,6 +190,24 @@ class ContentEngine:
             if filtered:
                 candidates = filtered
 
+            if float(item.get("trend_score", 0)) < 7:
+                issues.append(f"low trend_score at index {idx}")
+
+    def top_trending_content(self, limit: int = 10, bucket: Optional[str] = None) -> List[RankedContent]:
+        if limit <= 0:
+            return []
+        if bucket and bucket not in VALID_BUCKETS:
+            raise ValueError(f"bucket must be one of {sorted(VALID_BUCKETS)}")
+
+        rows = list(enumerate(self.contents))
+        if bucket:
+            filtered = [(i, c) for i, c in rows if c.get("posting_time") == bucket]
+            if filtered:
+                rows = filtered
+
+        rows.sort(key=lambda x: float(x[1].get("trend_score", 0)), reverse=True)
+        return [RankedContent(content_id=i, item=c, score=float(c.get("trend_score", 0))) for i, c in rows[:limit]]
+
         if blocked:
             filtered = [(i, c) for i, c in candidates if i not in blocked]
             if filtered:

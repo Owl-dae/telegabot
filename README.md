@@ -30,6 +30,8 @@
 - `/feedback <content_id> <1..10>`
 - `/stats`
 - `/optimize`
+- `/trending [n] [утро|день|вечер]`
+- `/help`
 
 ## Конфиг (`.env`)
 - `TELEGRAM_BOT_TOKEN`

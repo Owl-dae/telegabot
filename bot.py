@@ -59,6 +59,24 @@ def _set_state(context: ContextTypes.DEFAULT_TYPE, engine: ContentEngine, key: s
     engine.set_runtime_config(key, v)
 
 
+
+async def _safe_reply(update: Update, text: str, parse_mode: str | None = None, reply_markup=None) -> None:
+    if not update.message:
+        return
+    chunks = [text[i:i+3800] for i in range(0, len(text), 3800)] or [text]
+    first = True
+    for chunk in chunks:
+        await update.message.reply_text(chunk, parse_mode=parse_mode if first else None, reply_markup=reply_markup if first else None)
+        first = False
+
+
+async def _safe_send_channel(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str, reply_markup=None) -> None:
+    chunks = [text[i:i+3800] for i in range(0, len(text), 3800)] or [text]
+    first = True
+    for chunk in chunks:
+        await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML" if first else None, reply_markup=reply_markup if first else None)
+        first = False
+
 def _feedback_buttons(content_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("👍 7", callback_data=f"fb:{content_id}:7"), InlineKeyboardButton("🔥 9", callback_data=f"fb:{content_id}:9"), InlineKeyboardButton("🚀 10", callback_data=f"fb:{content_id}:10")]])
 
@@ -109,13 +127,13 @@ async def _publish_ranked(context: ContextTypes.DEFAULT_TYPE, ranked, bucket: st
         logger.info("DRY_RUN publish | bucket=%s style=%s score=%.2f", effective_bucket, style, ranked.score)
         return
 
-    await context.bot.send_message(chat_id=cfg.channel_id, text=text, parse_mode="HTML", reply_markup=_feedback_buttons(ranked.content_id))
+    await _safe_send_channel(context, cfg.channel_id, text, reply_markup=_feedback_buttons(ranked.content_id))
     engine.mark_posted(ranked.content_id, ranked.score, bucket=effective_bucket, style=style)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
-        await update.message.reply_text("Бот активен ✅\n/menu — панель управления")
+        await update.message.reply_text("Бот активен ✅\n/menu — панель управления\n/help — список команд\n/audit_content и /monetization_report")
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -277,7 +295,7 @@ async def publish_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(f"DRY_RUN\n\n{text}", parse_mode="HTML", reply_markup=_feedback_buttons(cid))
         return
 
-    await context.bot.send_message(chat_id=cfg.channel_id, text=text, parse_mode="HTML", reply_markup=_feedback_buttons(cid))
+    await _safe_send_channel(context, cfg.channel_id, text, reply_markup=_feedback_buttons(cid))
     engine.mark_posted(cid, float(item["trend_score"]), bucket=item.get("posting_time"), style=style)
     await update.message.reply_text("Опубликовано ✅")
 
@@ -377,6 +395,38 @@ async def optimize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         + "\n".join(f"- {x}" for x in rep["tips"])
     )
 
+
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = (
+        "Команды:\n"
+        "/menu /publish_now /publish_id <id> /top /queue /plan_day\n"
+        "/style /autopilot /set_cooldown /feedback /stats\n"
+        "/monetize /set_offer /monetization_report /audit_content /optimize\n"
+        "/trending [n] [утро|день|вечер]"
+    )
+    await _safe_reply(update, text)
+
+
+async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    engine: ContentEngine = context.application.bot_data["engine"]
+    cfg: BotConfig = context.application.bot_data["config"]
+    if not await _admin_guard(update, cfg) or not update.message:
+        return
+
+    n = 10
+    bucket = None
+    for arg in context.args:
+        if arg.isdigit():
+            n = max(1, min(30, int(arg)))
+        elif arg in VALID_BUCKETS:
+            bucket = arg
+
+    ranked = engine.top_trending_content(limit=n, bucket=bucket)
+    lines = [f"Трендовый список ({bucket or 'все'}, n={n}):"]
+    for i, r in enumerate(ranked, 1):
+        lines.append(f"{i}. #{r.content_id} {r.item['title']} | trend={r.item.get('trend_score')}")
+    await _safe_reply(update, "\n".join(lines))
 
     await q.answer()
     data = q.data or ""
@@ -545,6 +595,7 @@ def main() -> None:
     app.add_handler(CommandHandler("style", set_style))
     app.add_handler(CommandHandler("set_cooldown", set_cooldown))
     app.add_handler(CommandHandler("autopilot", autopilot_cmd))
+    app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("monetize", monetize_cmd))
     app.add_handler(CommandHandler("set_offer", set_offer))
     app.add_handler(CommandHandler("publish_now", publish_now))
@@ -554,6 +605,7 @@ def main() -> None:
     app.add_handler(CommandHandler("plan_day", plan_day))
     app.add_handler(CommandHandler("feedback", feedback))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("trending", trending))
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_error_handler(on_error)
 
