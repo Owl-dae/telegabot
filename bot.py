@@ -422,7 +422,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/style /autopilot /set_cooldown /feedback /stats\n"
         "/monetize /set_offer /monetization_report /audit_content /optimize\n"
         "/trending [n] [утро|день|вечер]\n"
-        "/strategy /publish_plan"
+        "/strategy /publish_plan /recent [n] /cleanup_data [days]"
     )
     await _safe_reply(update, text)
 
@@ -493,6 +493,48 @@ async def publish_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         published.append(f"OK {bucket}: #{ranked.content_id} {ranked.item['title']} | {style}")
 
     await _safe_reply(update, "\n".join(["Plan publish result:"] + published))
+
+
+async def recent_posts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    engine: ContentEngine = context.application.bot_data["engine"]
+    cfg: BotConfig = context.application.bot_data["config"]
+    if not await _admin_guard(update, cfg) or not update.message:
+        return
+
+    n = 10
+    if context.args and context.args[0].isdigit():
+        n = max(1, min(50, int(context.args[0])))
+
+    rows = engine.recent_posts(limit=n)
+    if not rows:
+        await _safe_reply(update, "Нет публикаций")
+        return
+
+    lines = [f"Recent posts (n={n}):"]
+    for r in rows:
+        lines.append(
+            f"#{r['content_id']} {r['title']} | score={r['score']} | bucket={r['bucket']} | style={r['style']} | {r['posted_at']}"
+        )
+    await _safe_reply(update, "\n".join(lines))
+
+
+async def cleanup_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    engine: ContentEngine = context.application.bot_data["engine"]
+    cfg: BotConfig = context.application.bot_data["config"]
+    if not await _admin_guard(update, cfg) or not update.message:
+        return
+
+    days = 180
+    if context.args and context.args[0].isdigit():
+        days = max(1, int(context.args[0]))
+
+    result = engine.cleanup_old_data(retention_days=days)
+    await _safe_reply(
+        update,
+        f"Cleanup done (retention_days={days})\n"
+        f"deleted_posts={result['deleted_posts']}\n"
+        f"deleted_feedback={result['deleted_feedback']}",
+    )
 
     await q.answer()
     data = q.data or ""
@@ -677,6 +719,8 @@ def main() -> None:
 
     app.add_handler(CommandHandler("publish_plan", publish_plan))
     app.add_handler(CommandHandler("strategy", strategy))
+    app.add_handler(CommandHandler("recent", recent_posts))
+    app.add_handler(CommandHandler("cleanup_data", cleanup_data))
     schedule_jobs(app)
     logger.info(
         "Bot started | dry_run=%s | autopilot=%s | style=%s | cooldown=%s | monetization=%s",

@@ -116,5 +116,16 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(ws["days"]), 7)
 
 
+    def test_recent_posts_and_cleanup(self):
+        ranked = self.engine.pick_next()
+        self.engine.mark_posted(ranked.content_id, ranked.score, bucket="день", style="viral")
+        recent = self.engine.recent_posts(limit=5)
+        self.assertGreaterEqual(len(recent), 1)
+
+        result = self.engine.cleanup_old_data(retention_days=3650)
+        self.assertIn("deleted_posts", result)
+        self.assertIn("deleted_feedback", result)
+
+
 if __name__ == "__main__":
     unittest.main()

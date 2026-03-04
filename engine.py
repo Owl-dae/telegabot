@@ -443,6 +443,59 @@ class ContentEngine:
 def _hook_line(item: Dict[str, Any]) -> str:
     return random.choice(
         [
+
+    def recent_posts(self, limit: int = 10) -> List[Dict[str, Any]]:
+        limit = max(1, min(100, int(limit)))
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, content_id, title, posted_at, score, bucket, platform, style
+                FROM posts
+                ORDER BY posted_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            {
+                "id": r[0],
+                "content_id": r[1],
+                "title": r[2],
+                "posted_at": r[3],
+                "score": r[4],
+                "bucket": r[5],
+                "platform": r[6],
+                "style": r[7],
+            }
+            for r in rows
+        ]
+
+    def cleanup_old_data(self, retention_days: int = 180) -> Dict[str, int]:
+        retention_days = max(1, int(retention_days))
+        with sqlite3.connect(self.db_path) as conn:
+            old_posts = conn.execute(
+                "SELECT COUNT(*) FROM posts WHERE posted_at < datetime('now', ?)",
+                (f"-{retention_days} days",),
+            ).fetchone()[0]
+            old_feedback = conn.execute(
+                "SELECT COUNT(*) FROM feedback WHERE created_at < datetime('now', ?)",
+                (f"-{retention_days} days",),
+            ).fetchone()[0]
+
+            conn.execute(
+                "DELETE FROM posts WHERE posted_at < datetime('now', ?)",
+                (f"-{retention_days} days",),
+            )
+            conn.execute(
+                "DELETE FROM feedback WHERE created_at < datetime('now', ?)",
+                (f"-{retention_days} days",),
+            )
+            conn.commit()
+
+        self._invalidate_snapshot_cache()
+        return {"deleted_posts": int(old_posts or 0), "deleted_feedback": int(old_feedback or 0)}
+
             f"⚡ {item['title']} — формат, который обычно дает лучший retention",
             f"🔥 {item['title']} — быстрый контент-план на сегодня",
             f"🚀 {item['title']} — идея под тренды и вовлечение",

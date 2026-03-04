@@ -29,6 +29,8 @@
 - `/plan_day`
 - `/publish_plan`
 - `/strategy`
+- `/recent [n]`
+- `/cleanup_data [days]`
 - `/feedback <content_id> <1..10>`
 - `/stats`
 - `/optimize`
