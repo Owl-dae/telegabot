@@ -65,3 +65,31 @@ python bot.py
 ```bash
 python -m unittest tests/test_engine.py
 ```
+
+
+## Запуск на любом ПК (EXE)
+Для Windows можно собрать standalone `.exe` через PyInstaller.
+
+### 1) Установить зависимости
+```bash
+pip install -r requirements.txt
+pip install -r requirements-build.txt
+```
+
+### 2) Собрать exe
+```bash
+python build_exe.py
+```
+
+После сборки файл появится в `dist/telegabot.exe` (или `dist/telegabot` на Linux/macOS).
+
+### 3) Запуск на целевом ПК
+1. Скопируй в одну папку:
+   - `telegabot.exe`
+   - `.env` (создай из `.env.example` и заполни токен/канал)
+2. Запусти `telegabot.exe`.
+
+### Важно
+- Для `ONEFILE` режима всё вшивается в один файл.
+- Можно задать имя exe: `EXE_NAME=mybot python build_exe.py`.
+- Можно отключить onefile: `ONEFILE=0 python build_exe.py`.
