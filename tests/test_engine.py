@@ -89,5 +89,18 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
 
+    def test_optimization_tips_structure(self):
+        rep = self.engine.optimization_tips()
+        self.assertIn("best_bucket", rep)
+        self.assertIn("best_style", rep)
+        self.assertIn("tips", rep)
+        self.assertTrue(isinstance(rep["tips"], list))
+
+    def test_format_post_has_engagement_prompt(self):
+        ranked = self.engine.pick_next()
+        text = format_post(ranked.content_id, ranked.item, style="viral")
+        self.assertIn("💬", text)
+
+
 if __name__ == "__main__":
     unittest.main()

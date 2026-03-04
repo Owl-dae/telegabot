@@ -2,6 +2,7 @@ import html
 import json
 import random
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,9 @@ class ContentEngine:
         self.db_path = Path(db_path)
         self.contents = self._load_content()
         self._ensure_db()
+        self._snapshot_cache_ttl_s = 20.0
+        self._snapshot_cached_at = 0.0
+        self._snapshot_cached_value = None
 
     def _load_content(self) -> List[Dict[str, Any]]:
         raw = json.loads(self.content_file.read_text(encoding="utf-8"))
@@ -118,6 +122,10 @@ class ContentEngine:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_content_id ON feedback(content_id)")
             conn.commit()
 
+    def _invalidate_snapshot_cache(self) -> None:
+        self._snapshot_cached_at = 0.0
+        self._snapshot_cached_value = None
+
     def get_runtime_config(self, key: str, default: Optional[str] = None) -> Optional[str]:
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute("SELECT value FROM runtime_config WHERE key = ?", (key,)).fetchone()
@@ -138,6 +146,10 @@ class ContentEngine:
             conn.commit()
 
     def _metrics_snapshot(self, recency_hours: int = 72) -> tuple[dict[int, float], dict[int, int], set[int], set[int]]:
+        now_mono = time.monotonic()
+        if self._snapshot_cached_value and (now_mono - self._snapshot_cached_at) <= self._snapshot_cache_ttl_s:
+            return self._snapshot_cached_value
+
         with sqlite3.connect(self.db_path) as conn:
             feedback_rows = conn.execute("SELECT content_id, AVG(value) FROM feedback GROUP BY content_id").fetchall()
             post_rows = conn.execute("SELECT content_id, COUNT(*) FROM posts GROUP BY content_id").fetchall()
@@ -153,7 +165,10 @@ class ContentEngine:
         posts_count = {cid: int(cnt or 0) for cid, cnt in post_rows}
         recent_ids = {cid for (cid,) in recent_rows}
         cooldown_ids = {cid for (cid,) in cooldown_rows}
-        return feedback_avg, posts_count, recent_ids, cooldown_ids
+        value = (feedback_avg, posts_count, recent_ids, cooldown_ids)
+        self._snapshot_cached_value = value
+        self._snapshot_cached_at = now_mono
+        return value
 
     def rank_candidates(
         self,
@@ -329,6 +344,33 @@ class ContentEngine:
             ).fetchall()
         return {
             "total_posts": total_posts,
+        self._invalidate_snapshot_cache()
+        self._invalidate_snapshot_cache()
+
+    def optimization_tips(self) -> Dict[str, Any]:
+        s = self.stats()
+        monetization_ready = bool(self.get_runtime_config("offer_url", ""))
+        best_bucket = self.recommend_best_bucket()
+        best_style = self.recommend_best_style(best_bucket)
+        best_platform = self.recommend_best_platform()
+
+        tips = [
+            f"Сфокусируйся на публикациях в окне: {best_bucket}",
+            f"Базовый стиль для роста сейчас: {best_style}",
+            f"Лучше всего заходит платформа-референс: {best_platform}",
+        ]
+        if not monetization_ready:
+            tips.append("Добавь OFFER_URL и включи monetization для захвата трафика")
+        if s["avg_feedback"] < 7:
+            tips.append("Подними интерактив: вопрос в конце + опрос в комментариях")
+
+        return {
+            "best_bucket": best_bucket,
+            "best_style": best_style,
+            "best_platform": best_platform,
+            "avg_feedback": s["avg_feedback"],
+            "tips": tips,
+        }
             "total_feedback": total_feedback,
             "avg_feedback": round(float(avg_feedback), 2),
             "avg_pick_score": round(float(avg_pick_score), 2),
@@ -348,18 +390,30 @@ def _hook_line(item: Dict[str, Any]) -> str:
     )
 
 
+def _engagement_prompt(item: Dict[str, Any]) -> str:
+    goal = str(item.get("content_goal", "")).lower()
+    if "обуч" in goal:
+        return "💬 Напиши в комментариях, какой пункт разобрать следующим."
+    if "мотив" in goal:
+        return "💬 Если заряжает — поставь 🔥 и поделись с другом."
+    if "развес" in goal:
+        return "💬 Оцени по шкале от 1 до 10, насколько жизненно."
+    return "💬 Напиши, сработает ли это у тебя сегодня."
+
+
 def format_post(content_id: int, item: Dict[str, Any], style: str = "viral") -> str:
     if style not in VALID_STYLES:
         style = "viral"
 
     hashtags = " ".join(html.escape(tag) for tag in item["hashtags"])
     variation_line = html.escape(random.choice(item["variation"]))
+    engagement_line = _engagement_prompt(item)
 
     if style == "concise":
         return (
             f"<b>{html.escape(item['title'])}</b>\n{html.escape(item['description'])}\n\n"
             f"🧪 {variation_line}\n{html.escape(item['call_to_action'])}\n\n"
-            f"{hashtags}\n#content_id_{content_id}"
+            f"{engagement_line}\n\n{hashtags}\n#content_id_{content_id}"
         )
 
     if style == "story":
@@ -369,7 +423,7 @@ def format_post(content_id: int, item: Dict[str, Any], style: str = "viral") -> 
             f"2) Действие: {html.escape(item['script'])}\n"
             f"3) Усиление: {variation_line}\n"
             f"4) CTA: {html.escape(item['call_to_action'])}\n\n"
-            f"{hashtags}\n#content_id_{content_id}"
+            f"{engagement_line}\n\n{hashtags}\n#content_id_{content_id}"
         )
 
     if style == "checklist":
@@ -381,7 +435,7 @@ def format_post(content_id: int, item: Dict[str, Any], style: str = "viral") -> 
             f"• Сценарий: {html.escape(item['script'])}\n"
             f"• A/B: {variation_line}\n"
             f"• CTA: {html.escape(item['call_to_action'])}\n\n"
-            f"{hashtags}\n#content_id_{content_id}"
+            f"{engagement_line}\n\n{hashtags}\n#content_id_{content_id}"
         )
 
     return (
@@ -393,7 +447,7 @@ def format_post(content_id: int, item: Dict[str, Any], style: str = "viral") -> 
         f"🎨 <b>Визуал:</b> {html.escape(item['visual_cues'])}\n"
         f"🔊 <b>Аудио:</b> {html.escape(item['audio_cues'])}\n\n"
         f"{html.escape(item['call_to_action'])}\n\n"
-        f"{hashtags}\n#content_id_{content_id}"
+        f"{engagement_line}\n\n{hashtags}\n#content_id_{content_id}"
     )
 
 

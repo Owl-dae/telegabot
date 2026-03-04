@@ -361,6 +361,23 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     if not q:
         return
+async def optimize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    engine: ContentEngine = context.application.bot_data["engine"]
+    cfg: BotConfig = context.application.bot_data["config"]
+    if not await _admin_guard(update, cfg) or not update.message:
+        return
+
+    rep = engine.optimization_tips()
+    await update.message.reply_text(
+        "Optimization report\n"
+        f"best_bucket={rep['best_bucket']}\n"
+        f"best_style={rep['best_style']}\n"
+        f"best_platform={rep['best_platform']}\n"
+        f"avg_feedback={rep['avg_feedback']}\n\n"
+        + "\n".join(f"- {x}" for x in rep["tips"])
+    )
+
+
     await q.answer()
     data = q.data or ""
 
@@ -545,6 +562,7 @@ def main() -> None:
         "Bot started | dry_run=%s | autopilot=%s | style=%s | cooldown=%s | monetization=%s",
         cfg.dry_run,
         autopilot,
+    app.add_handler(CommandHandler("optimize", optimize))
         style,
         cooldown,
         monetization_enabled,
