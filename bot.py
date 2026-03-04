@@ -63,19 +63,37 @@ def _set_state(context: ContextTypes.DEFAULT_TYPE, engine: ContentEngine, key: s
 async def _safe_reply(update: Update, text: str, parse_mode: str | None = None, reply_markup=None) -> None:
     if not update.message:
         return
-    chunks = [text[i:i+3800] for i in range(0, len(text), 3800)] or [text]
-    first = True
-    for chunk in chunks:
-        await update.message.reply_text(chunk, parse_mode=parse_mode if first else None, reply_markup=reply_markup if first else None)
-        first = False
+
+    if len(text) <= 3800:
+        await update.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        return
+
+    safe_text = _html_to_plain(text) if parse_mode else text
+    chunks = [safe_text[i:i+3800] for i in range(0, len(safe_text), 3800)] or [safe_text]
+    for idx, chunk in enumerate(chunks):
+        await update.message.reply_text(chunk, parse_mode=None, reply_markup=reply_markup if idx == 0 else None)
 
 
 async def _safe_send_channel(context: ContextTypes.DEFAULT_TYPE, chat_id: str, text: str, reply_markup=None) -> None:
-    chunks = [text[i:i+3800] for i in range(0, len(text), 3800)] or [text]
-    first = True
-    for chunk in chunks:
-        await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML" if first else None, reply_markup=reply_markup if first else None)
-        first = False
+    if len(text) <= 3800:
+        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", reply_markup=reply_markup)
+        return
+
+    safe_text = _html_to_plain(text)
+    chunks = [safe_text[i:i+3800] for i in range(0, len(safe_text), 3800)] or [safe_text]
+    for idx, chunk in enumerate(chunks):
+        await context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=None, reply_markup=reply_markup if idx == 0 else None)
+
+def _html_to_plain(text: str) -> str:
+    return (
+        text.replace("<b>", "")
+        .replace("</b>", "")
+        .replace("<i>", "")
+        .replace("</i>", "")
+        .replace("<code>", "")
+        .replace("</code>", "")
+    )
+
 
 def _feedback_buttons(content_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("👍 7", callback_data=f"fb:{content_id}:7"), InlineKeyboardButton("🔥 9", callback_data=f"fb:{content_id}:9"), InlineKeyboardButton("🚀 10", callback_data=f"fb:{content_id}:10")]])

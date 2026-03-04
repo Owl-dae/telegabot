@@ -50,6 +50,7 @@ class ContentEngine:
         self._snapshot_cache_ttl_s = 20.0
         self._snapshot_cached_at = 0.0
         self._snapshot_cached_value = None
+        self._snapshot_cache_key = None
 
     def _load_content(self) -> List[Dict[str, Any]]:
         raw = json.loads(self.content_file.read_text(encoding="utf-8"))
@@ -125,6 +126,7 @@ class ContentEngine:
     def _invalidate_snapshot_cache(self) -> None:
         self._snapshot_cached_at = 0.0
         self._snapshot_cached_value = None
+        self._snapshot_cache_key = None
 
     def get_runtime_config(self, key: str, default: Optional[str] = None) -> Optional[str]:
         with sqlite3.connect(self.db_path) as conn:
@@ -145,9 +147,18 @@ class ContentEngine:
             )
             conn.commit()
 
-    def _metrics_snapshot(self, recency_hours: int = 72) -> tuple[dict[int, float], dict[int, int], set[int], set[int]]:
+    def _metrics_snapshot(
+        self,
+        recency_hours: int = 72,
+        cooldown_hours: int = 24,
+    ) -> tuple[dict[int, float], dict[int, int], set[int], set[int]]:
         now_mono = time.monotonic()
-        if self._snapshot_cached_value and (now_mono - self._snapshot_cached_at) <= self._snapshot_cache_ttl_s:
+        cache_key = (recency_hours, cooldown_hours)
+        if (
+            self._snapshot_cached_value
+            and self._snapshot_cache_key == cache_key
+            and (now_mono - self._snapshot_cached_at) <= self._snapshot_cache_ttl_s
+        ):
             return self._snapshot_cached_value
 
         with sqlite3.connect(self.db_path) as conn:
@@ -158,7 +169,8 @@ class ContentEngine:
                 (f"-{recency_hours} hours",),
             ).fetchall()
             cooldown_rows = conn.execute(
-                "SELECT DISTINCT content_id FROM posts WHERE posted_at >= datetime('now', '-24 hours')"
+                "SELECT DISTINCT content_id FROM posts WHERE posted_at >= datetime('now', ?)",
+                (f"-{max(0, cooldown_hours)} hours",),
             ).fetchall()
 
         feedback_avg = {cid: float(avg or 0) for cid, avg in feedback_rows}
@@ -168,6 +180,7 @@ class ContentEngine:
         value = (feedback_avg, posts_count, recent_ids, cooldown_ids)
         self._snapshot_cached_value = value
         self._snapshot_cached_at = now_mono
+        self._snapshot_cache_key = cache_key
         return value
 
     def rank_candidates(
@@ -228,7 +241,7 @@ class ContentEngine:
             trend_weight = 0.7 if feedback < 6 else 0.5
             feedback_weight = 0.3 if feedback < 6 else 0.5
             diversity_penalty = min(1.5, published * 0.2)
-            score = (
+        feedback_avg, posts_count, recent_ids, cooldown_ids = self._metrics_snapshot(cooldown_hours=cooldown_hours)
                 trend_score * trend_weight
                 + feedback * feedback_weight
                 + freshness_bonus
